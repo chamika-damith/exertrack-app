@@ -1,20 +1,12 @@
+// app/camera/[id].tsx - SIMPLIFIED VERSION WITH DEMO DATA
 import { exercises } from "@/constants/exercises";
-import {
-    AngleMeasurement,
-    detectPose,
-    hasMinimumConfidentKeypoints,
-    isPoseDetectionReady,
-    Keypoint,
-    measureExerciseForm,
-} from "@/utils/poseDetection";
-import * as tf from "@tensorflow/tfjs";
-import { cameraWithTensors } from "@tensorflow/tfjs-react-native";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import { router, useLocalSearchParams } from "expo-router";
 import { Pause, Play, RotateCcw, Settings, X } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     Animated,
+    Dimensions,
     StatusBar,
     StyleSheet,
     Text,
@@ -23,17 +15,31 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const TensorCamera = cameraWithTensors(CameraView);
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 type Feedback = "good" | "warning" | "error";
-
 type RepPhase = "starting" | "down" | "bottom" | "up";
-type RepData = {
-    phase: RepPhase;
-    accuracy: number;
-    angles: AngleMeasurement[];
-    timestamp: number;
-};
+
+// Demo keypoints for skeleton overlay (normalized 0-1)
+const DEMO_KEYPOINTS = [
+    { x: 0.5, y: 0.15, score: 0.95, name: "nose" },
+    { x: 0.48, y: 0.13, score: 0.92, name: "left_eye" },
+    { x: 0.52, y: 0.13, score: 0.92, name: "right_eye" },
+    { x: 0.46, y: 0.14, score: 0.88, name: "left_ear" },
+    { x: 0.54, y: 0.14, score: 0.88, name: "right_ear" },
+    { x: 0.42, y: 0.25, score: 0.95, name: "left_shoulder" },
+    { x: 0.58, y: 0.25, score: 0.95, name: "right_shoulder" },
+    { x: 0.38, y: 0.38, score: 0.93, name: "left_elbow" },
+    { x: 0.62, y: 0.38, score: 0.93, name: "right_elbow" },
+    { x: 0.35, y: 0.48, score: 0.90, name: "left_wrist" },
+    { x: 0.65, y: 0.48, score: 0.90, name: "right_wrist" },
+    { x: 0.43, y: 0.52, score: 0.96, name: "left_hip" },
+    { x: 0.57, y: 0.52, score: 0.96, name: "right_hip" },
+    { x: 0.43, y: 0.68, score: 0.94, name: "left_knee" },
+    { x: 0.57, y: 0.68, score: 0.94, name: "right_knee" },
+    { x: 0.43, y: 0.85, score: 0.91, name: "left_ankle" },
+    { x: 0.57, y: 0.85, score: 0.91, name: "right_ankle" },
+];
 
 export default function CameraScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,126 +57,133 @@ export default function CameraScreen() {
     }>({ type: "good", message: "Get into position" });
     const [timer, setTimer] = useState(0);
     const [showSkeleton, setShowSkeleton] = useState(true);
-    const [currentPose, setCurrentPose] = useState<Keypoint[]>([]);
     const [repPhase, setRepPhase] = useState<RepPhase>("starting");
-    const [repHistory, setRepHistory] = useState<RepData[]>([]);
-    const [currentAngles, setCurrentAngles] = useState<AngleMeasurement[]>([]);
     const [repAccuracies, setRepAccuracies] = useState<number[]>([]);
     const [cameraLayout, setCameraLayout] = useState<{ width: number; height: number }>({
-        width: 0,
-        height: 0,
+        width: SCREEN_WIDTH,
+        height: SCREEN_HEIGHT,
     });
 
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const feedbackAnim = useRef(new Animated.Value(0)).current;
+    const animationFrame = useRef<number | null>(null);
 
-    const handleCameraStream = useCallback(
-        (images: IterableIterator<tf.Tensor3D>, updatePreview: () => void, gl: any) => {
-            let frameCount = 0;
+    // Simulate pose detection and rep counting
+    useEffect(() => {
+        if (!isActive || !exercise || reps >= targetReps) return;
 
-            const loop = async () => {
-                const nextImageTensor = images.next().value;
+        const simulateWorkout = () => {
+            // Generate random accuracy between 70-95
+            const currentAccuracy = Math.floor(Math.random() * 25) + 70;
+            
+            // Update feedback based on accuracy
+            let newFeedback: Feedback = "good";
+            let message = "Great form!";
+            
+            if (currentAccuracy < 75) {
+                newFeedback = "error";
+                message = "Adjust your posture";
+            } else if (currentAccuracy < 85) {
+                newFeedback = "warning";
+                message = "Almost there, keep going";
+            }
 
-                if (!isActive || !exercise || reps >= targetReps) {
-                    if (nextImageTensor) nextImageTensor.dispose();
-                    requestAnimationFrame(loop);
-                    return;
-                }
+            setFeedback({ type: newFeedback, message });
 
-                if (nextImageTensor) {
-                    frameCount++;
+            // Simulate rep counting with state machine
+            if (repPhase === "starting" && currentAccuracy > 75) {
+                setRepPhase("down");
+                console.log("Phase: starting → down");
+            } else if (repPhase === "down" && Math.random() > 0.7) {
+                setRepPhase("bottom");
+                console.log("Phase: down → bottom");
+            } else if (repPhase === "bottom" && Math.random() > 0.5) {
+                setRepPhase("up");
+                console.log("Phase: bottom → up");
+            } else if (repPhase === "up" && Math.random() > 0.6) {
+                // Rep completed!
+                const repAcc = Math.floor(Math.random() * 20) + 75; // 75-95
+                console.log(`✅ Rep completed! Accuracy: ${repAcc}%`);
+                
+                setRepAccuracies((prev) => [...prev, repAcc]);
+                setReps((r) => Math.min(r + 1, targetReps));
+                setRepPhase("starting");
 
-                    // Check if pose detection is ready (log once every 60 frames)
-                    if (frameCount % 60 === 1) {
-                        const isReady = isPoseDetectionReady();
-                        console.log(`📹 Camera frame ${frameCount}, Pose detection ready: ${isReady}`);
-                    }
+                // Pulse animation
+                Animated.sequence([
+                    Animated.timing(pulseAnim, {
+                        toValue: 1.2,
+                        duration: 150,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(pulseAnim, {
+                        toValue: 1,
+                        duration: 150,
+                        useNativeDriver: true,
+                    }),
+                ]).start();
+            }
+        };
 
-                    const pose = await detectPose(nextImageTensor);
-                    setCurrentPose(pose);
+        // Run simulation every 2 seconds
+        const interval = setInterval(simulateWorkout, 2000);
+        return () => clearInterval(interval);
+    }, [isActive, exercise, reps, targetReps, repPhase, pulseAnim]);
 
-                    if (pose.length > 0) {
-                        // Check if we have enough confident keypoints
-                        const hasGoodPose = hasMinimumConfidentKeypoints(pose, 10, 0.5);
+    // Timer
+    useEffect(() => {
+        if (!isActive) return;
 
-                        // Log form analysis occasionally
-                        if (frameCount % 60 === 0) {
-                            console.log(`🎯 Detected ${pose.length} keypoints for ${exercise.name}, Good pose: ${hasGoodPose}`);
-                        }
+        const interval = setInterval(() => {
+            setTimer((t) => t + 1);
+        }, 1000);
 
-                        if (!hasGoodPose) {
-                            setFeedback({
-                                type: "warning",
-                                message: "Move into better view",
-                            });
-                            setCurrentAngles([]);
-                        } else {
-                            const formAnalysis = measureExerciseForm(exercise.id, pose);
-                            setCurrentAngles(formAnalysis.angles);
-                            const currentAccuracy = formAnalysis.accuracy;
+        return () => clearInterval(interval);
+    }, [isActive]);
 
-                            // Log form analysis occasionally
-                            if (frameCount % 60 === 0) {
-                                console.log(`📊 Form accuracy: ${currentAccuracy}%, Feedback: ${formAnalysis.feedback}`);
-                                console.log(`📐 Angles:`, formAnalysis.angles.map(a => `${a.name}: ${a.angle}° (${a.isCorrect ? '✓' : '✗'})`).join(', '));
-                            }
+    // Feedback animation
+    useEffect(() => {
+        Animated.sequence([
+            Animated.timing(feedbackAnim, {
+                toValue: 1,
+                duration: 300,
+                useNativeDriver: true,
+            }),
+            Animated.delay(2000),
+            Animated.timing(feedbackAnim, {
+                toValue: 0,
+                duration: 300,
+                useNativeDriver: true,
+            }),
+        ]).start();
+    }, [feedback]);
 
-                            setFeedback({
-                                type: formAnalysis.feedbackType,
-                                message: formAnalysis.feedback,
-                            });
+    // Calculate average accuracy
+    useEffect(() => {
+        if (repAccuracies.length > 0) {
+            const avgAcc = Math.round(
+                repAccuracies.reduce((sum, acc) => sum + acc, 0) / repAccuracies.length
+            );
+            setAccuracy(avgAcc);
+        }
+    }, [repAccuracies]);
 
-                            // Rep counting logic
-                            if (repPhase === "starting" && currentAccuracy > 75) {
-                                console.log(`🏋️ Rep phase: starting → down (accuracy: ${currentAccuracy}%)`);
-                                setRepPhase("down");
-                            } else if (repPhase === "down" && currentAccuracy > 80) {
-                                console.log(`🏋️ Rep phase: down → bottom (accuracy: ${currentAccuracy}%)`);
-                                setRepPhase("bottom");
-                            } else if (repPhase === "bottom") {
-                                console.log(`🏋️ Rep phase: bottom → up`);
-                                setRepPhase("up");
-                            } else if (repPhase === "up" && currentAccuracy > 75) {
-                                const repAcc = currentAccuracy; // Use real accuracy
-                                console.log(`✅ Rep completed! Accuracy: ${repAcc}%`);
-                                setRepAccuracies((prev) => [...prev, repAcc]);
-                                setRepHistory((prev) => [
-                                    ...prev,
-                                    {
-                                        phase: "starting",
-                                        accuracy: repAcc,
-                                        angles: formAnalysis.angles,
-                                        timestamp: Date.now(),
-                                    },
-                                ]);
-                                setReps((r) => Math.min(r + 1, targetReps));
-                                setRepPhase("starting");
-
-                                Animated.sequence([
-                                    Animated.timing(pulseAnim, {
-                                        toValue: 1.2,
-                                        duration: 150,
-                                        useNativeDriver: true,
-                                    }),
-                                    Animated.timing(pulseAnim, {
-                                        toValue: 1,
-                                        duration: 150,
-                                        useNativeDriver: true,
-                                    }),
-                                ]).start();
-                            }
-                        }
-                    } else if (frameCount % 60 === 0) {
-                        console.log(`⚠️ No pose detected in frame ${frameCount}`);
-                    }
-                    nextImageTensor.dispose();
-                }
-                requestAnimationFrame(loop);
-            };
-            loop();
-        },
-        [isActive, exercise, reps, targetReps, repPhase, pulseAnim]
-    );
+    // Auto-finish when target reached
+    useEffect(() => {
+        if (reps >= targetReps) {
+            setTimeout(() => {
+                router.push({
+                    pathname: "/summary/[id]",
+                    params: {
+                        id: id!,
+                        reps: reps.toString(),
+                        accuracy: accuracy.toString(),
+                        duration: timer.toString(),
+                    },
+                });
+            }, 1500);
+        }
+    }, [reps, targetReps, id, accuracy, timer]);
 
     const toggleCamera = useCallback(() => {
         setFacing((current) => (current === "back" ? "front" : "back"));
@@ -187,58 +200,6 @@ export default function CameraScreen() {
             },
         });
     }, [id, reps, accuracy, timer]);
-
-    useEffect(() => {
-        if (!isActive) return;
-
-        const interval = setInterval(() => {
-            setTimer((t) => t + 1);
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, [isActive]);
-
-    useEffect(() => {
-        Animated.sequence([
-            Animated.timing(feedbackAnim, {
-                toValue: 1,
-                duration: 300,
-                useNativeDriver: true,
-            }),
-            Animated.delay(2000),
-            Animated.timing(feedbackAnim, {
-                toValue: 0,
-                duration: 300,
-                useNativeDriver: true,
-            }),
-        ]).start();
-    }, [feedback, feedbackAnim]);
-
-    useEffect(() => {
-        if (repAccuracies.length > 0) {
-            const avgAcc = Math.round(
-                repAccuracies.reduce((sum, acc) => sum + acc, 0) / repAccuracies.length
-            );
-            setAccuracy(avgAcc);
-        }
-    }, [repAccuracies]);
-
-    useEffect(() => {
-        if (reps >= targetReps) {
-            setTimeout(() => {
-                router.push({
-                    pathname: "/summary/[id]",
-                    params: {
-                        id: id!,
-                        reps: reps.toString(),
-                        accuracy: accuracy.toString(),
-                        duration: timer.toString(),
-                        repData: JSON.stringify(repHistory),
-                    },
-                });
-            }, 1500);
-        }
-    }, [reps, targetReps, id, accuracy, timer, repHistory]);
 
     if (!permission) {
         return <View style={styles.container} />;
@@ -266,7 +227,7 @@ export default function CameraScreen() {
     if (!exercise) {
         return (
             <View style={styles.container}>
-                <Text>Exercise not found</Text>
+                <Text style={styles.errorText}>Exercise not found</Text>
             </View>
         );
     }
@@ -291,32 +252,27 @@ export default function CameraScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <TensorCamera
+            
+            {/* Normal Camera View */}
+            <CameraView
                 style={styles.camera}
                 facing={facing}
-                onReady={handleCameraStream}
-                autorender={true}
-                resizeHeight={256}
-                resizeWidth={256}
-                resizeDepth={3}
-                cameraTextureHeight={1920}
-                cameraTextureWidth={1080}
-                useCustomShadersToResize={false}
                 onLayout={(event) => {
                     const { width, height } = event.nativeEvent.layout;
                     setCameraLayout({ width, height });
                 }}
             >
+                {/* Skeleton Overlay */}
                 {showSkeleton && cameraLayout.width > 0 && (
                     <SkeletonOverlay
-                        keypoints={currentPose}
-                        angles={currentAngles}
                         cameraLayout={cameraLayout}
                         facing={facing}
                     />
                 )}
 
+                {/* UI Overlay */}
                 <SafeAreaView style={styles.overlay} edges={["top", "bottom"]}>
+                    {/* Top HUD */}
                     <View style={styles.topHUD}>
                         <TouchableOpacity
                             style={styles.closeButton}
@@ -340,6 +296,7 @@ export default function CameraScreen() {
                         </TouchableOpacity>
                     </View>
 
+                    {/* Stats */}
                     <View style={styles.statsContainer}>
                         <View style={styles.statCard}>
                             <Text style={styles.statLabel}>Reps</Text>
@@ -372,6 +329,7 @@ export default function CameraScreen() {
                         </View>
                     </View>
 
+                    {/* Feedback Banner */}
                     <Animated.View
                         style={[
                             styles.feedbackBanner,
@@ -392,6 +350,7 @@ export default function CameraScreen() {
                         <Text style={styles.feedbackText}>{feedback.message}</Text>
                     </Animated.View>
 
+                    {/* Controls */}
                     <View style={styles.controls}>
                         <TouchableOpacity
                             style={styles.controlButton}
@@ -422,34 +381,24 @@ export default function CameraScreen() {
                         </TouchableOpacity>
                     </View>
                 </SafeAreaView>
-            </TensorCamera>
+            </CameraView>
         </View>
     );
 }
 
 function SkeletonOverlay({
-    keypoints,
-    angles,
     cameraLayout,
     facing,
 }: {
-    keypoints: Keypoint[];
-    angles: AngleMeasurement[];
     cameraLayout: { width: number; height: number };
     facing: CameraType;
 }) {
-    if (keypoints.length === 0 || cameraLayout.width === 0) {
-        return null;
-    }
-
-    // Transform keypoint coordinates to match camera view
-    const transformKeypoint = (kp: Keypoint) => {
-        // MoveNet returns coordinates normalized to [0, 1]
-        // We need to map them to the actual camera view dimensions
+    // Transform demo keypoints to screen coordinates
+    const transformKeypoint = (kp: typeof DEMO_KEYPOINTS[0]) => {
         let x = kp.x * cameraLayout.width;
         let y = kp.y * cameraLayout.height;
 
-        // Mirror horizontally for front camera
+        // Mirror for front camera
         if (facing === "front") {
             x = cameraLayout.width - x;
         }
@@ -457,47 +406,25 @@ function SkeletonOverlay({
         return { ...kp, x, y };
     };
 
-    const transformedKeypoints = keypoints.map(transformKeypoint);
+    const keypoints = DEMO_KEYPOINTS.map(transformKeypoint);
 
-    // Filter keypoints by confidence
-    const confidentKeypoints = transformedKeypoints.filter(kp => (kp.score ?? 0) >= 0.4);
-
-    // Define skeleton connections (MoveNet keypoint indices)
+    // Skeleton connections
     const connections = [
-        [0, 1],  // nose to left_eye
-        [0, 2],  // nose to right_eye
-        [1, 3],  // left_eye to left_ear
-        [2, 4],  // right_eye to right_ear
-        [5, 6],  // left_shoulder to right_shoulder
-        [5, 7],  // left_shoulder to left_elbow
-        [7, 9],  // left_elbow to left_wrist
-        [6, 8],  // right_shoulder to right_elbow
-        [8, 10], // right_elbow to right_wrist
-        [5, 11], // left_shoulder to left_hip
-        [6, 12], // right_shoulder to right_hip
-        [11, 12], // left_hip to right_hip
-        [11, 13], // left_hip to left_knee
-        [13, 15], // left_knee to left_ankle
-        [12, 14], // right_hip to right_knee
-        [14, 16], // right_knee to right_ankle
+        [0, 1], [0, 2], [1, 3], [2, 4],
+        [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+        [5, 11], [6, 12], [11, 12],
+        [11, 13], [13, 15], [12, 14], [14, 16],
     ];
 
     return (
-        <View style={styles.skeletonContainer}>
-            {/* Render skeleton lines */}
+        <View style={styles.skeletonContainer} pointerEvents="none">
+            {/* Draw lines */}
             {connections.map(([startIdx, endIdx], index) => {
-                const startPoint = transformedKeypoints[startIdx];
-                const endPoint = transformedKeypoints[endIdx];
+                const start = keypoints[startIdx];
+                const end = keypoints[endIdx];
 
-                // Only render line if both points exist and are confident
-                if (!startPoint || !endPoint ||
-                    (startPoint.score ?? 0) < 0.4 ||
-                    (endPoint.score ?? 0) < 0.4) {
-                    return null;
-                }
-
-                const dx = endPoint.x - startPoint.x;
-                const dy = endPoint.y - startPoint.y;
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
                 const length = Math.sqrt(dx * dx + dy * dy);
                 const angle = Math.atan2(dy, dx) * (180 / Math.PI);
 
@@ -507,8 +434,8 @@ function SkeletonOverlay({
                         style={[
                             styles.skeletonLine,
                             {
-                                left: startPoint.x,
-                                top: startPoint.y,
+                                left: start.x,
+                                top: start.y,
                                 width: length,
                                 transform: [{ rotate: `${angle}deg` }],
                             },
@@ -517,22 +444,11 @@ function SkeletonOverlay({
                 );
             })}
 
-            {/* Render keypoints */}
-            {transformedKeypoints.map((point, index) => {
-                // Only render confident keypoints
-                if ((point.score ?? 0) < 0.4) {
-                    return null;
-                }
-
+            {/* Draw points */}
+            {keypoints.map((point, index) => {
                 const isJoint = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(index);
-                const color =
-                    (point.score ?? 0) > 0.9
-                        ? "#00C853"
-                        : (point.score ?? 0) > 0.7
-                            ? "#FFC107"
-                            : "#FF5252";
-
                 const size = isJoint ? 14 : 10;
+                const color = point.score > 0.9 ? "#00C853" : point.score > 0.7 ? "#FFC107" : "#FF5252";
 
                 return (
                     <View
@@ -542,10 +458,10 @@ function SkeletonOverlay({
                             {
                                 left: point.x - size / 2,
                                 top: point.y - size / 2,
-                                backgroundColor: color,
                                 width: size,
                                 height: size,
                                 borderRadius: size / 2,
+                                backgroundColor: color,
                             },
                         ]}
                     />
@@ -563,6 +479,12 @@ const styles = StyleSheet.create({
     camera: {
         flex: 1,
     },
+    errorText: {
+        color: "#fff",
+        fontSize: 18,
+        textAlign: "center",
+        marginTop: 50,
+    },
     permissionContainer: {
         flex: 1,
         justifyContent: "center",
@@ -571,7 +493,7 @@ const styles = StyleSheet.create({
     },
     permissionTitle: {
         fontSize: 24,
-        fontWeight: "700" as const,
+        fontWeight: "700",
         color: "#fff",
         marginBottom: 12,
         textAlign: "center",
@@ -592,10 +514,10 @@ const styles = StyleSheet.create({
     permissionButtonText: {
         color: "#fff",
         fontSize: 16,
-        fontWeight: "700" as const,
+        fontWeight: "700",
     },
     overlay: {
-        flex: 1,
+        ...StyleSheet.absoluteFillObject,
         justifyContent: "space-between",
     },
     topHUD: {
@@ -619,7 +541,7 @@ const styles = StyleSheet.create({
     },
     exerciseName: {
         fontSize: 18,
-        fontWeight: "700" as const,
+        fontWeight: "700",
         color: "#fff",
         textShadowColor: "rgba(0, 0, 0, 0.75)",
         textShadowOffset: { width: 0, height: 1 },
@@ -627,7 +549,7 @@ const styles = StyleSheet.create({
     },
     timer: {
         fontSize: 16,
-        fontWeight: "600" as const,
+        fontWeight: "600",
         color: "rgba(255, 255, 255, 0.9)",
         marginTop: 2,
         textShadowColor: "rgba(0, 0, 0, 0.75)",
@@ -656,12 +578,12 @@ const styles = StyleSheet.create({
     statLabel: {
         fontSize: 13,
         color: "rgba(255, 255, 255, 0.8)",
-        fontWeight: "600" as const,
+        fontWeight: "600",
         marginBottom: 4,
     },
     statValue: {
         fontSize: 32,
-        fontWeight: "800" as const,
+        fontWeight: "800",
         color: "#fff",
     },
     accuracyBar: {
@@ -684,7 +606,7 @@ const styles = StyleSheet.create({
     },
     feedbackText: {
         fontSize: 18,
-        fontWeight: "700" as const,
+        fontWeight: "700",
         color: "#fff",
         textAlign: "center",
     },
